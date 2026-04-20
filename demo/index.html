@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Inextractability – Measuring Extraction Risk in LLM APIs</title>
+<style>
+  :root {
+    --bg: #fafafa; --card: #ffffff; --text: #1a1a2e; --muted: #6b7280;
+    --accent: #2563eb; --accent-light: #dbeafe; --border: #e5e7eb;
+    --red: #ef4444; --green: #22c55e; --yellow: #eab308;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+
+  /* Header */
+  .header { background: linear-gradient(135deg, #1e293b 0%, #334155 100%); color: white; padding: 3rem 1.5rem 2.5rem; text-align: center; }
+  .header h1 { font-size: 1.75rem; font-weight: 700; margin-bottom: 0.5rem; max-width: 700px; margin-left: auto; margin-right: auto; }
+  .header .subtitle { color: #94a3b8; font-size: 0.95rem; margin-bottom: 1rem; }
+  .header .authors { color: #cbd5e1; font-size: 0.9rem; margin-bottom: 1rem; }
+  .header .links a { color: #93c5fd; text-decoration: none; margin: 0 0.75rem; font-size: 0.9rem; font-weight: 500; }
+  .header .links a:hover { text-decoration: underline; }
+
+  /* Main container */
+  .container { max-width: 860px; margin: 0 auto; padding: 2rem 1.5rem; }
+
+  /* Cards */
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; }
+  .card h2 { font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem; }
+
+  /* Input area */
+  textarea { width: 100%; min-height: 120px; border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; font-family: 'Menlo', 'Consolas', monospace; font-size: 0.85rem; resize: vertical; outline: none; transition: border-color 0.2s; }
+  textarea:focus { border-color: var(--accent); }
+
+  /* Controls */
+  .controls { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; margin-top: 1rem; }
+  .param { display: flex; align-items: center; gap: 0.4rem; }
+  .param label { font-size: 0.85rem; font-weight: 500; color: var(--muted); }
+  .param input[type="number"] { width: 60px; padding: 0.35rem 0.5rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.85rem; text-align: center; }
+  .param select { padding: 0.35rem 0.5rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.85rem; }
+
+  button.primary { background: var(--accent); color: white; border: none; border-radius: 8px; padding: 0.6rem 1.5rem; font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+  button.primary:hover { background: #1d4ed8; }
+  button.primary:disabled { background: #94a3b8; cursor: not-allowed; }
+
+  /* Progress */
+  .progress-wrap { margin-top: 1rem; display: none; }
+  .progress-bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+  .progress-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.3s; width: 0%; }
+  .progress-text { font-size: 0.8rem; color: var(--muted); margin-top: 0.3rem; }
+
+  /* Status */
+  .status { font-size: 0.85rem; color: var(--muted); margin-top: 0.5rem; min-height: 1.2em; }
+  .status.error { color: var(--red); }
+
+  /* Results */
+  #results { display: none; }
+  .stats { display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.25rem; }
+  .stat-box { background: #f8fafc; border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 1rem; flex: 1; min-width: 140px; }
+  .stat-box .label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
+  .stat-box .value { font-size: 1.25rem; font-weight: 700; margin-top: 0.2rem; font-family: 'Menlo', monospace; }
+
+  /* Heatmap text */
+  .heatmap-container { margin-top: 1rem; }
+  .heatmap-text { font-family: 'Menlo', 'Consolas', monospace; font-size: 0.82rem; line-height: 2; word-wrap: break-word; }
+  .heatmap-text .token { padding: 2px 1px; border-radius: 3px; cursor: default; position: relative; }
+  .heatmap-text .token:hover { outline: 2px solid #333; outline-offset: 1px; z-index: 1; }
+
+  /* Tooltip */
+  .tooltip { display: none; position: fixed; background: #1e293b; color: white; padding: 0.5rem 0.75rem; border-radius: 6px; font-size: 0.78rem; pointer-events: none; z-index: 100; white-space: nowrap; font-family: 'Menlo', monospace; }
+
+  /* Legend */
+  .legend { display: flex; align-items: center; gap: 0.5rem; margin-top: 1rem; font-size: 0.8rem; color: var(--muted); }
+  .legend-bar { width: 200px; height: 12px; border-radius: 6px; background: linear-gradient(to right, #ef4444, #f97316, #eab308, #84cc16, #22c55e); }
+
+  /* Mode tabs */
+  .tabs { display: flex; gap: 0; margin-bottom: 1rem; border-bottom: 2px solid var(--border); }
+  .tab { padding: 0.5rem 1rem; font-size: 0.85rem; font-weight: 500; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; color: var(--muted); transition: all 0.2s; }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab:hover { color: var(--text); }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* Greedy highlights */
+  .greedy-text { font-family: 'Menlo', 'Consolas', monospace; font-size: 0.82rem; line-height: 2; word-wrap: break-word; }
+  .greedy-text .token { padding: 2px 1px; border-radius: 3px; }
+  .greedy-text .token.rank1 { background: #fee2e2; }
+  .greedy-text .token.not-rank1 { background: #dcfce7; }
+  .greedy-text .extractable-window { background: #bbf7d0; border-radius: 4px; padding: 1px 0; }
+
+  /* Info banner */
+  .info { background: var(--accent-light); border-radius: 8px; padding: 0.75rem 1rem; font-size: 0.83rem; color: #1e40af; margin-bottom: 1.5rem; }
+
+  /* Footer */
+  .footer { text-align: center; padding: 2rem 1.5rem; color: var(--muted); font-size: 0.8rem; border-top: 1px solid var(--border); margin-top: 2rem; }
+  .footer code { background: #f1f5f9; padding: 0.5rem 1rem; border-radius: 6px; display: block; max-width: 600px; margin: 0.5rem auto; text-align: left; font-size: 0.75rem; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Beyond Indistinguishability: Measuring Extraction Risk in LLM APIs</h1>
+  <div class="authors">Ruixuan Liu &middot; David Evans &middot; Li Xiong</div>
+  <div class="subtitle">IEEE Symposium on Security and Privacy (S&amp;P) 2026</div>
+  <div class="links">
+    <a href="#">📄 Paper</a>
+    <a href="https://github.com/Emory-AIMS/Inextractability">💻 Code</a>
+  </div>
+</div>
+
+<div class="container">
+
+  <div class="info">
+    This interactive demo runs <strong>GPT-2</strong> entirely in your browser using
+    <a href="https://huggingface.co/docs/transformers.js" target="_blank">Transformers.js</a> + WebGPU.
+    No data leaves your machine. First visit downloads the model (~250 MB, cached afterwards).
+  </div>
+
+  <!-- Input -->
+  <div class="card">
+    <h2>Input Text</h2>
+    <textarea id="inputText" placeholder="Paste or type text here (one or more paragraphs)...">We hold these truths to be self-evident, that all men are created equal, that they are endowed by their Creator with certain unalienable Rights, that among these are Life, Liberty and the pursuit of Happiness. That to secure these rights, Governments are instituted among Men, deriving their just powers from the consent of the governed.</textarea>
+    <div class="controls">
+      <div class="param">
+        <label>l (window):</label>
+        <input type="number" id="paramL" value="5" min="2" max="200">
+      </div>
+      <div class="param">
+        <label>m (rank threshold):</label>
+        <input type="number" id="paramM" value="20" min="1" max="100">
+      </div>
+      <button class="primary" id="btnAnalyze" onclick="runAnalysis()">Analyze</button>
+    </div>
+    <div class="progress-wrap" id="progressWrap">
+      <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+      <div class="progress-text" id="progressText">Loading model...</div>
+    </div>
+    <div class="status" id="status"></div>
+  </div>
+
+  <!-- Results -->
+  <div id="results">
+    <!-- Stats -->
+    <div class="card">
+      <h2>Summary</h2>
+      <div class="stats">
+        <div class="stat-box">
+          <div class="label">b (inextractability)</div>
+          <div class="value" id="statB">—</div>
+        </div>
+        <div class="stat-box">
+          <div class="label">p* (max window prob)</div>
+          <div class="value" id="statPstar">—</div>
+        </div>
+        <div class="stat-box">
+          <div class="label">η (greedy rate)</div>
+          <div class="value" id="statEta">—</div>
+        </div>
+        <div class="stat-box">
+          <div class="label">Extractable / Total</div>
+          <div class="value" id="statWindows">—</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Visualization -->
+    <div class="card">
+      <div class="tabs">
+        <div class="tab active" onclick="switchTab('cost')">Extraction Cost Heatmap</div>
+        <div class="tab" onclick="switchTab('greedy')">Greedy Extractability</div>
+      </div>
+
+      <div class="tab-content active" id="tab-cost">
+        <p style="font-size:0.83rem;color:var(--muted);margin-bottom:0.75rem;">
+          Each token is colored by the <strong>minimum <em>b</em></strong> across all <em>l</em>-gram windows containing it.
+          Red = low <em>b</em> (easy to extract), green = high <em>b</em> (hard to extract).
+        </p>
+        <div class="heatmap-text" id="heatmapText"></div>
+        <div class="legend">
+          <span>Vulnerable</span>
+          <div class="legend-bar"></div>
+          <span>Safe</span>
+        </div>
+      </div>
+
+      <div class="tab-content" id="tab-greedy">
+        <p style="font-size:0.83rem;color:var(--muted);margin-bottom:0.75rem;">
+          <span style="background:#fee2e2;padding:2px 6px;border-radius:3px;">Green</span> = rank 1 (greedy-decodable),
+          <span style="background:#dcfce7;padding:2px 6px;border-radius:3px;">Red</span> = rank &gt; 1.
+          Contiguous green spans of length ≥ <em>l</em> are greedy-extractable windows.
+        </p>
+        <div class="greedy-text" id="greedyText"></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">
+  <div style="margin-bottom:0.5rem;">If you use this tool, please cite our paper:</div>
+  <code>@inproceedings{liu2026inextractability,
+  title     = {Beyond Indistinguishability: Measuring Extraction Risk in LLM APIs},
+  author    = {Liu, Ruixuan and Evans, David and Xiong, Li},
+  booktitle = {IEEE S&amp;P},
+  year      = {2026}
+}</code>
+</div>
+
+<!-- Tooltip -->
+<div class="tooltip" id="tooltip"></div>
+
+<script type="module">
+// ============================================================
+// Transformers.js: load GPT-2 in the browser
+// ============================================================
+import { AutoTokenizer, AutoModelForCausalLM } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
+
+let tokenizer = null;
+let model = null;
+let isLoading = false;
+
+// ---------- UI helpers ----------
+const $ = id => document.getElementById(id);
+const setStatus = (msg, isErr = false) => {
+  const el = $('status');
+  el.textContent = msg;
+  el.className = isErr ? 'status error' : 'status';
+};
+
+function showProgress(show) {
+  $('progressWrap').style.display = show ? 'block' : 'none';
+}
+function updateProgress(pct, text) {
+  $('progressFill').style.width = pct + '%';
+  $('progressText').textContent = text;
+}
+
+// ---------- Model loading ----------
+async function ensureModel() {
+  if (model && tokenizer) return;
+  if (isLoading) return;
+  isLoading = true;
+
+  showProgress(true);
+  setStatus('');
+
+  try {
+    updateProgress(10, 'Loading tokenizer...');
+    tokenizer = await AutoTokenizer.from_pretrained('Xenova/gpt2');
+    updateProgress(30, 'Loading model (this may take a moment on first visit)...');
+
+    model = await AutoModelForCausalLM.from_pretrained('Xenova/gpt2', {
+      progress_callback: (p) => {
+        if (p.progress !== undefined) {
+          const pct = 30 + Math.round(p.progress * 0.65);
+          updateProgress(pct, `Downloading model... ${Math.round(p.progress)}%`);
+        }
+      }
+    });
+
+    updateProgress(100, 'Model ready.');
+    setTimeout(() => showProgress(false), 800);
+  } catch (e) {
+    setStatus('Failed to load model: ' + e.message, true);
+    showProgress(false);
+    isLoading = false;
+    throw e;
+  }
+  isLoading = false;
+}
+
+// ============================================================
+// Core algorithms (mirrors Python implementation)
+// ============================================================
+
+function getTokenRanks(logitsTensor, inputIds) {
+  // logitsTensor.dims = [1, seqLen, vocabSize]
+  const [, seqLen, vocabSize] = logitsTensor.dims;
+  const data = logitsTensor.data;
+  const ranks = [];
+  const probs = [];
+
+  for (let pos = 0; pos < seqLen - 1; pos++) {
+    const offset = pos * vocabSize;
+    const actualToken = inputIds[pos + 1];
+    const targetLogit = data[offset + actualToken];
+
+    // Rank: count tokens with strictly higher logit
+    let rank = 1;
+    // Also compute softmax probability (numerically stable)
+    let maxLogit = -Infinity;
+    for (let v = 0; v < vocabSize; v++) {
+      const val = data[offset + v];
+      if (val > targetLogit) rank++;
+      if (val > maxLogit) maxLogit = val;
+    }
+
+    let expSum = 0;
+    for (let v = 0; v < vocabSize; v++) {
+      expSum += Math.exp(data[offset + v] - maxLogit);
+    }
+    const prob = Math.exp(targetLogit - maxLogit) / expSum;
+
+    ranks.push(rank);
+    probs.push(prob);
+  }
+  return { ranks, probs };
+}
+
+// Algorithm 2: per-window extraction cost
+function computeExtractionCost(ranks, probs, l, m) {
+  const n = ranks.length;
+  if (n < l) return null;
+
+  const windowBs = [];  // b value for each window
+  let maxLog2P = -Infinity;
+  // let worstSpan = null;
+  let worstSpans = [];
+
+  for (let i = 0; i <= n - l; i++) {
+    let log2P = 0;
+    for (let j = i; j < i + l; j++) {
+      const r = ranks[j];
+      if (r <= m) {
+        log2P -= Math.log2(r);
+      } else {
+        const p = probs[j];
+        log2P += p > 0 ? Math.log2(p) : -Infinity;
+      }
+    }
+    const b = -log2P;
+    windowBs.push(b);
+
+    if (log2P > maxLog2P) {
+      maxLog2P = log2P;
+      // worstSpan = [i, i + l - 1];
+      worstSpans = [[i, i + l - 1]];
+    } else if (log2P === maxLog2P) {
+      worstSpans.push([i, i + l - 1]);
+    }
+  }
+
+  const pStar = maxLog2P > -Infinity ? Math.pow(2, maxLog2P) : 0;
+  const bGlobal = -maxLog2P;
+
+  return { b: bGlobal, pStar, worstSpans, windowBs };
+}
+
+// Algorithm 3: greedy extractable rate
+function computeGreedyRate(ranks, l) {
+  const n = ranks.length;
+  if (n < l) return null;
+
+  const nTotal = n - l + 1;
+  let nExtractable = 0;
+  const extractableWindows = [];
+  let i = 0;
+
+  while (i <= n - l) {
+    let failPos = null;
+    for (let j = i; j < i + l; j++) {
+      if (ranks[j] !== 1) { failPos = j; break; }
+    }
+    if (failPos === null) {
+      nExtractable++;
+      extractableWindows.push([i, i + l - 1]);
+      i++;
+    } else {
+      i = failPos + 1;
+    }
+  }
+
+  return { eta: nExtractable / nTotal, nExtractable, nTotal, extractableWindows };
+}
+
+// Per-token minimum b (for heatmap)
+function perTokenMinB(windowBs, l, nTokens) {
+  const minB = new Float64Array(nTokens).fill(Infinity);
+  for (let w = 0; w < windowBs.length; w++) {
+    const b = windowBs[w];
+    for (let j = w; j < w + l && j < nTokens; j++) {
+      if (b < minB[j]) minB[j] = b;
+    }
+  }
+  return minB;
+}
+
+// ============================================================
+// Visualization
+// ============================================================
+
+function bToColor(b, minB, maxB) {
+  // Map b ∈ [minB, maxB] to hue ∈ [0 (red), 120 (green)]
+  const range = maxB - minB || 1;
+  const t = Math.max(0, Math.min(1, (b - minB) / range));
+  const hue = t * 120;
+  return `hsl(${hue}, 75%, 80%)`;
+}
+
+function renderHeatmap(tokens, minBPerToken, worstSpans) {
+  const container = $('heatmapText');
+  container.innerHTML = '';
+
+  const validBs = Array.from(minBPerToken).filter(v => isFinite(v));
+  const globalMinB = Math.min(...validBs);
+  const globalMaxB = Math.max(...validBs);
+
+  tokens.forEach((tok, i) => {
+    const span = document.createElement('span');
+    span.className = 'token';
+    span.textContent = tok;
+
+    if (isFinite(minBPerToken[i])) {
+      span.style.backgroundColor = bToColor(minBPerToken[i], globalMinB, globalMaxB);
+      // const isWorst = worstSpan && i >= worstSpan[0] && i <= worstSpan[1];
+      const isWorst = worstSpans && worstSpans.some(span => i >= span[0] && i <= span[1]);
+      if (isWorst) span.style.outline = '2px solid #ef4444';
+      span.dataset.info = `token: "${tok}"  |  min b: ${minBPerToken[i].toFixed(2)} bits` +
+        (isWorst ? '  ★ most vulnerable window' : '');
+    } else {
+      span.style.backgroundColor = '#f1f5f9';
+      span.dataset.info = `token: "${tok}"  |  (prefix, no full window)`;
+    }
+
+    span.addEventListener('mouseenter', showTooltip);
+    span.addEventListener('mouseleave', hideTooltip);
+    container.appendChild(span);
+  });
+}
+
+function renderGreedy(tokens, ranks, extractableWindows) {
+  const container = $('greedyText');
+  container.innerHTML = '';
+
+  // Mark which tokens are in extractable windows
+  const inExtractable = new Uint8Array(tokens.length);
+  for (const [s, e] of extractableWindows) {
+    for (let j = s; j <= e && j < tokens.length; j++) inExtractable[j] = 1;
+  }
+
+  tokens.forEach((tok, i) => {
+    const span = document.createElement('span');
+    span.className = 'token';
+    span.textContent = tok;
+
+    if (i < ranks.length) {
+      const r = ranks[i];
+      span.classList.add(r === 1 ? 'rank1' : 'not-rank1');
+      if (inExtractable[i]) {
+        span.style.backgroundColor = '#fca5a5';
+        span.style.fontWeight = '600';
+      }
+      span.dataset.info = `token: "${tok}"  |  rank: ${r}` + (inExtractable[i] ? '  ★ extractable' : '');
+    } else {
+      span.style.backgroundColor = '#f1f5f9';
+      span.dataset.info = `token: "${tok}"  |  (first token, no rank)`;
+    }
+
+    span.addEventListener('mouseenter', showTooltip);
+    span.addEventListener('mouseleave', hideTooltip);
+    container.appendChild(span);
+  });
+}
+
+// Tooltip
+function showTooltip(e) {
+  const tip = $('tooltip');
+  tip.textContent = e.target.dataset.info || '';
+  tip.style.display = 'block';
+  tip.style.left = e.clientX + 12 + 'px';
+  tip.style.top = e.clientY - 36 + 'px';
+}
+function hideTooltip() { $('tooltip').style.display = 'none'; }
+
+// Tab switching
+window.switchTab = function(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelector(`.tab-content#tab-${name}`).classList.add('active');
+  // Find the tab button
+  const tabs = document.querySelectorAll('.tab');
+  tabs.forEach(t => { if ((name === 'cost' && t.textContent.includes('Cost')) || (name === 'greedy' && t.textContent.includes('Greedy'))) t.classList.add('active'); });
+};
+
+// ============================================================
+// Main analysis
+// ============================================================
+
+window.runAnalysis = async function() {
+  const btn = $('btnAnalyze');
+  const text = $('inputText').value.trim();
+  if (!text) { setStatus('Please enter some text.', true); return; }
+
+  const l = parseInt($('paramL').value) || 5;
+  const m = parseInt($('paramM').value) || 20;
+
+  btn.disabled = true;
+  setStatus('Loading model...');
+
+  try {
+    await ensureModel();
+  } catch (e) { btn.disabled = false; return; }
+
+  setStatus('Tokenizing...');
+  const encoded = await tokenizer(text, { add_special_tokens: false });
+  const inputIds = Array.from(encoded.input_ids.data).map(Number);
+  const nTokens = inputIds.length;
+
+  if (nTokens < l + 1) {
+    setStatus(`Text has ${nTokens} tokens but need at least ${l + 1}. Use a longer text or reduce l.`, true);
+    btn.disabled = false;
+    return;
+  }
+
+  // Decode each token for display
+  const tokenStrings = inputIds.map(id => tokenizer.decode([id]));
+
+  setStatus(`Running forward pass (${nTokens} tokens)...`);
+  await new Promise(r => setTimeout(r, 50)); // let UI update
+
+  try {
+    const output = await model({ input_ids: encoded.input_ids, attention_mask: encoded.attention_mask });
+    const logits = output.logits;
+
+    setStatus('Computing ranks and probabilities...');
+    await new Promise(r => setTimeout(r, 30));
+
+    const { ranks, probs } = getTokenRanks(logits, inputIds);
+
+    // Algorithm 2
+    const costResult = computeExtractionCost(ranks, probs, l, m);
+
+    // Algorithm 3
+    const greedyResult = computeGreedyRate(ranks, l);
+
+    // Update stats
+    $('statB').textContent = costResult ? costResult.b.toFixed(2) : '—';
+    $('statPstar').textContent = costResult ? costResult.pStar.toExponential(2) : '—';
+    $('statEta').textContent = greedyResult ? greedyResult.eta.toFixed(4) : '—';
+    $('statWindows').textContent = greedyResult ? `${greedyResult.nExtractable} / ${greedyResult.nTotal}` : '—';
+
+    // Heatmap (Algorithm 2)
+    if (costResult) {
+      const minBPer = perTokenMinB(costResult.windowBs, l, tokenStrings.length);
+      renderHeatmap(tokenStrings, minBPer, costResult.worstSpans);
+    }
+
+    // Greedy (Algorithm 3)
+    if (greedyResult) {
+      renderGreedy(tokenStrings, ranks, greedyResult.extractableWindows);
+    }
+
+    $('results').style.display = 'block';
+    setStatus(`Done. Analyzed ${nTokens} tokens, ${ranks.length} positions, ${costResult ? costResult.windowBs.length : 0} windows.`);
+
+    // Free tensor memory
+    logits.dispose?.();
+  } catch (e) {
+    setStatus('Error during analysis: ' + e.message, true);
+    console.error(e);
+  }
+
+  btn.disabled = false;
+};
+</script>
+
+</body>
+</html>

@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=64.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "inextractability"
+version = "0.1.0"
+description = "Measuring extraction risk in LLM APIs"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.9"
+dependencies = [
+    "torch>=2.0.0",
+    "transformers>=4.40.0",
+    "numpy>=1.24.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Emory-AIMS/Inextractability"
+Paper = "https://arxiv.org/abs/YOUR_ARXIV_ID"
