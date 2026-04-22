@@ -14,7 +14,7 @@ Existing privacy notions like differential privacy and membership inference focu
 
 Try the algorithms directly in your browser — no install, no GPU required:
 
-**[Launch Demo](https://emory-aims.github.io/Inextractability/)**
+**[Launch Demo](https://rachelxuan11.github.io/Inextractability/)**
 
 [![Demo Screenshot](docs/screenshot.png)](https://emory-aims.github.io/Inextractability/)
 
